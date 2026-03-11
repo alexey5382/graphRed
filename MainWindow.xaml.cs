@@ -215,8 +215,24 @@ namespace Lab1
                 data.CurrentSize = sizeValue;
                 if (data.OriginalBasePoints != null)
                 {
-                    RecalculateBasePoints(data);
+                    // Вычисляем коэффициент изменения (насколько изменился масштаб)
+                    double ratio = sizeValue / data.CurrentSize;
+
+                    // Пропорционально обновляем длины сторон, чтобы они росли вместе с масштабом
+                    if (data.SideLengths != null)
+                    {
+                        for (int i = 0; i < data.SideLengths.Length; i++)
+                        {
+                            data.SideLengths[i] *= ratio;
+                        }
+                    }
+
+                    // Сохраняем новый масштаб
+                    data.CurrentSize = sizeValue;
+
+                    // ВАЖНО: мы убрали RecalculateBasePoints(data);
                     UpdatePolygonGeometry(_selectedElement);
+                    UpdateBoundingBox(_selectedElement);
                 }
                 else
                 {
