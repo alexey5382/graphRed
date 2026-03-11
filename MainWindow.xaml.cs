@@ -18,6 +18,9 @@ namespace Lab1
         private Point _clickPosition;
         private bool _isUpdating = false;
         private Ellipse _draggedAnchor;
+        private int _selectedSideIndex = -1; // -1 означает, что выбрана вся фигура
+        private Dictionary<int, TextBox> _lenBoxes = new Dictionary<int, TextBox>();
+        private Dictionary<int, Slider> _lenSliders = new Dictionary<int, Slider>();
 
         private readonly List<Brush> _availableColors = new List<Brush> {
             Brushes.Black, Brushes.Red, Brushes.Orange, Brushes.Yellow, Brushes.Green, Brushes.Blue, Brushes.Purple, Brushes.White
@@ -140,6 +143,7 @@ namespace Lab1
 
         private void DeselectAll()
         {
+            _selectedSideIndex = -1; // Сбрасываем выбранную сторону
             var anchor = _selectedElement?.Children.OfType<Ellipse>().FirstOrDefault(a => a.Tag?.ToString() == "Anchor");
             if (anchor != null) anchor.Visibility = Visibility.Collapsed;
 
@@ -153,6 +157,7 @@ namespace Lab1
             }
             _selectedElement = null;
             PropertiesPanel.Visibility = Visibility.Collapsed;
+            
         }
         private void DeleteShape_Click(object sender, RoutedEventArgs e)
         {
@@ -236,14 +241,15 @@ namespace Lab1
                 }
                 else
                 {
-                    var ellipse = _selectedElement.Children.OfType<Ellipse>().FirstOrDefault();
+                    // Обязательно игнорируем точку Anchor
+                    var ellipse = _selectedElement.Children.OfType<Ellipse>().FirstOrDefault(e => e.Tag?.ToString() != "Anchor");
                     if (ellipse != null)
                     {
-                        double t = ellipse.StrokeThickness;
-                        ellipse.Width = Math.Max(0, sizeValue * 2 - t);
-                        ellipse.Height = Math.Max(0, sizeValue * 2 - t);
-                        Canvas.SetLeft(ellipse, 500 - sizeValue + t / 2);
-                        Canvas.SetTop(ellipse, 500 - sizeValue + t / 2);
+                        // Просто применяем масштаб
+                        ellipse.Width = sizeValue * 2;
+                        ellipse.Height = sizeValue * 2;
+                        Canvas.SetLeft(ellipse, 500 - sizeValue);
+                        Canvas.SetTop(ellipse, 500 - sizeValue);
                         UpdateBoundingBox(_selectedElement);
                     }
                 }
@@ -286,6 +292,22 @@ namespace Lab1
         }        // --- Динамическое меню сторон ---
         private void GenerateSideMenu(Canvas container, int sidesCount)
         {
+            SidePropertiesList.Children.Clear();
+            _lenBoxes.Clear();   // Очищаем старые ссылки
+            _lenSliders.Clear();
+
+            // Кнопка возврата ко всем сторонам
+            if (_selectedSideIndex != -1)
+            {
+                var backBtn = new Button { Content = "← Вернуться ко всем сторонам", Foreground = Brushes.White, Background = new SolidColorBrush(Color.FromRgb(60, 60, 60)), BorderThickness = new Thickness(0), Padding = new Thickness(5), Margin = new Thickness(0, 0, 0, 15) };
+                backBtn.Click += (s, e) => {
+                    _selectedSideIndex = -1;
+                    GenerateSideMenu(container, sidesCount);
+                    UpdatePolygonGeometry(container); // Убираем пунктир
+                };
+                SidePropertiesList.Children.Add(backBtn);
+            }
+
             // Очищаем старые элементы в правой панели
             SidePropertiesList.Children.Clear();
 
@@ -300,52 +322,27 @@ namespace Lab1
 
             for (int i = 0; i < sidesCount; i++)
             {
+                if (_selectedSideIndex != -1 && i != _selectedSideIndex) continue;
                 int sideIndex = i;
-                var group = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+                var group = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
 
-                // --- СТРОКА 1: Заголовок, Цвет, Толщина (с кнопками + и -) ---
-                var row1 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+                // --- СТРОКА 1: Заголовок и Цвет ---
+                var row1 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
                 row1.Children.Add(new TextBlock { Text = $"СТОР. {i + 1}", FontWeight = FontWeights.Bold, Foreground = Brushes.White, Width = 55, VerticalAlignment = VerticalAlignment.Center });
 
-                var colorCombo = new ComboBox { Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, Width = 50, Margin = new Thickness(0, 0, 10, 0) };
+                var colorCombo = new ComboBox { Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, Width = 50 };
                 foreach (var color in _availableColors) colorCombo.Items.Add(new Rectangle { Fill = color, Width = 30, Height = 12 });
 
                 Brush currentBrush = shapeData?.CurrentColors != null && i < shapeData.CurrentColors.Length ? shapeData.CurrentColors[i] : (ellipse?.Stroke ?? Brushes.Black);
                 colorCombo.SelectedIndex = _availableColors.FindIndex(b => b.ToString() == currentBrush.ToString());
                 colorCombo.SelectionChanged += (s, e) => { if (!_isUpdating) UpdateSide(container, sideIndex, _availableColors[colorCombo.SelectedIndex], -1); };
                 row1.Children.Add(colorCombo);
-
-                row1.Children.Add(new TextBlock { Text = "Толщ:", Foreground = lightText, FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
-
-                double currentThick = shapeData?.CurrentThicknesses != null && i < shapeData.CurrentThicknesses.Length ? shapeData.CurrentThicknesses[i] : (ellipse?.StrokeThickness / 2 ?? 2);
-                var thickBox = new TextBox { Text = Math.Round(currentThick).ToString(), Width = 30, Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, TextAlignment = TextAlignment.Center };
-
-                // Кнопка уменьшения толщины
-                var minusBtn = new Button { Content = "-", Width = 20, Height = 20, Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, Margin = new Thickness(0, 0, 2, 0) };
-                minusBtn.Click += (s, e) => {
-                    if (double.TryParse(thickBox.Text, out double v) && v > 1) thickBox.Text = (v - 1).ToString();
-                };
-
-                // Кнопка увеличения толщины
-                var plusBtn = new Button { Content = "+", Width = 20, Height = 20, Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, Margin = new Thickness(2, 0, 0, 0) };
-                plusBtn.Click += (s, e) => {
-                    if (double.TryParse(thickBox.Text, out double v) && v < 50) thickBox.Text = (v + 1).ToString();
-                };
-
-                thickBox.TextChanged += (s, e) => {
-                    if (!_isUpdating && double.TryParse(thickBox.Text, out double v) && v >= 1 && v <= 50)
-                        UpdateSide(container, sideIndex, null, v);
-                };
-
-                row1.Children.Add(minusBtn);
-                row1.Children.Add(thickBox);
-                row1.Children.Add(plusBtn);
                 group.Children.Add(row1);
 
                 // --- СТРОКА 2: Координаты X и Y ---
                 if (shapeData != null && shapeData.BasePoints != null)
                 {
-                    var row2 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+                    var row2 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
 
                     double px = shapeData.BasePoints[i].X * shapeData.CurrentSize + 500;
                     double py = shapeData.BasePoints[i].Y * shapeData.CurrentSize + 500;
@@ -369,6 +366,7 @@ namespace Lab1
                             shapeData.BasePoints[sideIndex] = new Point(normX, shapeData.BasePoints[sideIndex].Y);
                             if (shapeData.OriginalBasePoints != null) shapeData.OriginalBasePoints[sideIndex] = new Point(normX, shapeData.OriginalBasePoints[sideIndex].Y);
                             UpdatePolygonGeometry(container);
+                            SyncMenuLengths(shapeData, -1);
                             _isUpdating = false;
                         }
                     };
@@ -382,68 +380,124 @@ namespace Lab1
                             shapeData.BasePoints[sideIndex] = new Point(shapeData.BasePoints[sideIndex].X, normY);
                             if (shapeData.OriginalBasePoints != null) shapeData.OriginalBasePoints[sideIndex] = new Point(shapeData.OriginalBasePoints[sideIndex].X, normY);
                             UpdatePolygonGeometry(container);
+                            SyncMenuLengths(shapeData, -1);
                             _isUpdating = false;
                         }
                     };
 
                     group.Children.Add(row2);
-
-                    // --- СТРОКА 3: Длина (Слайдер и поле с ограничением) ---
-                    if (shapeData.SideLengths != null && i < shapeData.SideLengths.Length)
-                    {
-                        var row3 = new StackPanel { Orientation = Orientation.Horizontal };
-                        row3.Children.Add(new TextBlock { Text = "Дл:", Foreground = lightText, FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 3, 0) });
-
-                        double maxLen = 1000; // Максимально допустимая длина (можете изменить под ваши нужды)
-                        double currentLen = shapeData.SideLengths[i];
-
-                        var lenSlider = new Slider { Width = 80, Minimum = 10, Maximum = maxLen, Value = currentLen, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
-                        var lenBox = new TextBox { Width = 45, Text = Math.Round(currentLen).ToString(), Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, TextAlignment = TextAlignment.Center };
-
-                        lenSlider.ValueChanged += (s, e) => {
-                            if (!_isUpdating)
-                            {
-                                lenBox.Text = Math.Round(e.NewValue).ToString();
-                            }
-                        };
-
-                        lenBox.TextChanged += (s, e) => {
-                            if (!_isUpdating && double.TryParse(lenBox.Text, out double v))
-                            {
-                                // Проверка и обрезка до максимального/минимального значения
-                                if (v > maxLen)
-                                {
-                                    v = maxLen;
-                                    _isUpdating = true;
-                                    lenBox.Text = maxLen.ToString();
-                                    lenBox.CaretIndex = lenBox.Text.Length; // Оставляем текстовый курсор в конце
-                                    _isUpdating = false;
-                                }
-                                if (v < 10) v = 10;
-
-                                _isUpdating = true;
-                                lenSlider.Value = v;
-                                shapeData.SideLengths[sideIndex] = v;
-
-                                // Перерасчет геометрии (методы из вашего кода)
-                                RecalculateBasePoints(shapeData);
-                                ApplyScale(shapeData.CurrentSize);
-                                UpdatePolygonGeometry(container);
-
-                                _isUpdating = false;
-                            }
-                        };
-
-                        row3.Children.Add(lenSlider);
-                        row3.Children.Add(lenBox);
-                        group.Children.Add(row3);
-                    }
                 }
 
-                group.Children.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(60, 60, 60)), Margin = new Thickness(0, 6, 0, 0) });
+                // --- СТРОКА 3: Длина (Слайдер и поле) ---
+                if (shapeData?.SideLengths != null && i < shapeData.SideLengths.Length)
+                {
+                    var row3 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+                    row3.Children.Add(new TextBlock { Text = "Дл:", Foreground = lightText, FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 3, 0), Width = 25 });
+
+                    double maxLen = 1000;
+                    double currentLen = shapeData.SideLengths[i];
+                    //алтимшорекитлок
+                    var lenSlider = new Slider { Width = 100, Minimum = 10, Maximum = maxLen, Value = currentLen, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
+                    var lenBox = new TextBox { Width = 40, Text = Math.Round(currentLen).ToString(), Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, TextAlignment = TextAlignment.Center };
+
+                    _lenSliders[sideIndex] = lenSlider;
+                    _lenBoxes[sideIndex] = lenBox;
+
+                    lenSlider.ValueChanged += (s, e) => { if (!_isUpdating) lenBox.Text = Math.Round(e.NewValue).ToString(); };
+
+                    lenBox.TextChanged += (s, e) => {
+                        if (!_isUpdating && double.TryParse(lenBox.Text, out double v))
+                        {
+                            if (v > maxLen) { v = maxLen; _isUpdating = true; lenBox.Text = maxLen.ToString(); lenBox.CaretIndex = lenBox.Text.Length; _isUpdating = false; }
+                            if (v < 10) v = 10;
+
+                            _isUpdating = true;
+                            lenSlider.Value = v;
+                            shapeData.SideLengths[sideIndex] = v;
+
+                            int next = (sideIndex + 1) % shapeData.BasePoints.Length;
+                            Point p1 = shapeData.BasePoints[sideIndex];
+                            Point p2 = shapeData.BasePoints[next];
+
+                            double dx = p2.X - p1.X;
+                            double dy = p2.Y - p1.Y;
+                            double currentLenNorm = Math.Sqrt(dx * dx + dy * dy);
+
+                            if (currentLenNorm > 0.0001)
+                            {
+                                double targetLenNorm = v / shapeData.CurrentSize;
+                                double deltaNorm = targetLenNorm - currentLenNorm;
+                                double offsetX = (dx / currentLenNorm) * (deltaNorm / 2.0);
+                                double offsetY = (dy / currentLenNorm) * (deltaNorm / 2.0);
+
+                                shapeData.BasePoints[sideIndex] = new Point(p1.X - offsetX, p1.Y - offsetY);
+                                shapeData.BasePoints[next] = new Point(p2.X + offsetX, p2.Y + offsetY);
+
+                                if (shapeData.OriginalBasePoints != null)
+                                {
+                                    shapeData.OriginalBasePoints[sideIndex] = shapeData.BasePoints[sideIndex];
+                                    shapeData.OriginalBasePoints[next] = shapeData.BasePoints[next];
+                                }
+                            }
+                            UpdatePolygonGeometry(container);
+                            SyncMenuLengths(shapeData, sideIndex);
+                            _isUpdating = false;
+                        }
+                    };
+
+                    row3.Children.Add(lenSlider);
+                    row3.Children.Add(lenBox);
+                    group.Children.Add(row3);
+                }
+
+                // --- СТРОКА 4: Толщина (Ползунок, -, Поле, +) ---
+                var row4 = new StackPanel { Orientation = Orientation.Horizontal };
+                row4.Children.Add(new TextBlock { Text = "Толщ:", Foreground = lightText, FontSize = 10, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 3, 0), Width = 30 });
+
+                double currentThick = shapeData?.CurrentThicknesses != null && i < shapeData.CurrentThicknesses.Length ? shapeData.CurrentThicknesses[i] : (ellipse?.StrokeThickness ?? 2);
+
+                // Добавляем ползунок толщины
+                var thickSlider = new Slider { Width = 100, Minimum = 1, Maximum = 50, Value = currentThick, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
+
+                var minusBtn = new Button { Content = "-", Width = 18, Height = 18, Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, Margin = new Thickness(0, 0, 2, 0) };
+                var thickBox = new TextBox { Text = Math.Round(currentThick).ToString(), Width = 30, Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, TextAlignment = TextAlignment.Center };
+                var plusBtn = new Button { Content = "+", Width = 18, Height = 18, Background = darkInputBg, Foreground = Brushes.White, BorderBrush = inputBorder, Margin = new Thickness(2, 0, 0, 0) };
+
+                thickSlider.ValueChanged += (s, e) => {
+                    if (!_isUpdating) thickBox.Text = Math.Round(e.NewValue).ToString();
+                };
+
+                minusBtn.Click += (s, e) => {
+                    if (double.TryParse(thickBox.Text, out double v) && v > 1) thickBox.Text = (v - 1).ToString();
+                };
+
+                plusBtn.Click += (s, e) => {
+                    if (double.TryParse(thickBox.Text, out double v) && v < 50) thickBox.Text = (v + 1).ToString();
+                };
+
+                thickBox.TextChanged += (s, e) => {
+                    if (!_isUpdating && double.TryParse(thickBox.Text, out double v))
+                    {
+                        if (v < 1) v = 1;
+                        if (v > 50) v = 50;
+
+                        _isUpdating = true;
+                        thickSlider.Value = v;
+                        UpdateSide(container, sideIndex, null, v);
+                        _isUpdating = false;
+                    }
+                };
+
+                row4.Children.Add(thickSlider);
+                row4.Children.Add(minusBtn);
+                row4.Children.Add(thickBox);
+                row4.Children.Add(plusBtn);
+                group.Children.Add(row4);
+
+                // Разделитель
+                group.Children.Add(new Separator { Background = new SolidColorBrush(Color.FromRgb(60, 60, 60)), Margin = new Thickness(0, 8, 0, 0) });
                 SidePropertiesList.Children.Add(group);
             }
-
         }
         private StackPanel CreateSideControlGroup(int index, Brush currentBrush, double currentThick)
         {
@@ -484,19 +538,26 @@ namespace Lab1
                 }
                 else // Круг
                 {
-                    var ellipse = container.Children.OfType<Ellipse>().FirstOrDefault();
+                    // Ищем круг, игнорируя точку привязки
+                    var ellipse = container.Children.OfType<Ellipse>().FirstOrDefault(e => e.Tag?.ToString() != "Anchor");
                     if (ellipse != null)
                     {
                         if (color != null) ellipse.Stroke = color;
                         if (thick > 0)
                         {
+                            if (data.CurrentThicknesses != null && index < data.CurrentThicknesses.Length)
+                            {
+                                data.CurrentThicknesses[index] = thick;
+                            }
+
                             ellipse.StrokeThickness = thick;
-                            // Пересчитываем позицию и размер, чтобы толщина росла внутрь
+
+                            // Возвращаем чистые размеры (WPF сам нарастит толщину внутрь)
                             double size = data.CurrentSize;
-                            ellipse.Width = Math.Max(0, size * 2 - thick);
-                            ellipse.Height = Math.Max(0, size * 2 - thick);
-                            Canvas.SetLeft(ellipse, 500 - size + thick / 2);
-                            Canvas.SetTop(ellipse, 500 - size + thick / 2);
+                            ellipse.Width = size * 2;
+                            ellipse.Height = size * 2;
+                            Canvas.SetLeft(ellipse, 500 - size);
+                            Canvas.SetTop(ellipse, 500 - size);
                         }
                         UpdateBoundingBox(container);
                     }
@@ -521,24 +582,40 @@ namespace Lab1
                 return;
             }
             // 2. Клик по фигуре
+            // 2. Клик по фигуре или её стороне
+            // 2. Клик по фигуре или её стороне
             if (e.Source is Shape clickedShape)
             {
                 var parentCanvas = VisualTreeHelper.GetParent(clickedShape) as Canvas;
 
                 if (parentCanvas != null && parentCanvas != MainCanvas)
                 {
-                    // Если фигура ЕЩЕ НЕ выбрана - просто выбираем её (меню обновится само внутри SelectShape)
-                    if (_selectedElement != parentCanvas)
+                    // Проверяем, кликнули ли мы точно по обводке (стороне)
+                    int clickedSide = -1;
+                    if (clickedShape is Polygon poly && poly.Tag?.ToString() == "Stroke")
                     {
-                        SelectShape(parentCanvas);
+                        var strokes = parentCanvas.Children.OfType<Polygon>().Where(p => p.Tag?.ToString() == "Stroke").ToList();
+                        clickedSide = strokes.IndexOf(poly);
                     }
-                    // Если фигура УЖЕ выбрана - захватываем мышь для перемещения
-                    else
+
+                    // Если фигура еще не выбрана ИЛИ мы кликнули по другой грани
+                    if (_selectedElement != parentCanvas || _selectedSideIndex != clickedSide)
                     {
-                        _draggedElement = parentCanvas;
-                        _clickPosition = e.GetPosition(MainCanvas);
-                        _draggedElement.CaptureMouse();
+                        SelectShape(parentCanvas); // ВНИМАНИЕ: это сбрасывает _selectedSideIndex в -1
+
+                        _selectedSideIndex = clickedSide; // ТЕПЕРЬ устанавливаем индекс выбранной стороны
+
+                        // Перерисовываем меню, чтобы оставить только 1 сторону, и обновляем пунктир
+                        int sides = parentCanvas.Children.OfType<Polygon>().Count(p => p.Tag?.ToString() == "Stroke");
+                        if (sides == 0) sides = 1;
+                        GenerateSideMenu(parentCanvas, sides);
+                        UpdatePolygonGeometry(parentCanvas);
                     }
+
+                    // Захватываем мышь для перемещения
+                    _draggedElement = parentCanvas;
+                    _clickPosition = e.GetPosition(MainCanvas);
+                    _draggedElement.CaptureMouse();
                 }
             }
             else
@@ -630,7 +707,6 @@ namespace Lab1
 
             int n = data.BasePoints.Length;
             double size = data.CurrentSize;
-
             // 1. Координаты в пикселях
             Point[] pts = new Point[n];
             for (int i = 0; i < n; i++)
@@ -682,6 +758,28 @@ namespace Lab1
                     strokePolygons[i].Fill = data.CurrentColors[i];
                 }
             }
+            var highlight = container.Children.OfType<Line>().FirstOrDefault(l => l.Tag?.ToString() == "SideHighlight");
+            if (container == _selectedElement && _selectedSideIndex >= 0 && _selectedSideIndex < n && data.CurrentThicknesses != null)
+            {
+                if (highlight == null)
+                {
+                    highlight = new Line { Tag = "SideHighlight", Stroke = Brushes.White, StrokeThickness = 3, StrokeDashArray = new DoubleCollection { 3, 3 }, IsHitTestVisible = false };
+                    Panel.SetZIndex(highlight, 999);
+                    container.Children.Add(highlight);
+                }
+                highlight.Visibility = Visibility.Visible;
+
+                int next = (_selectedSideIndex + 1) % n;
+                highlight.X1 = data.BasePoints[_selectedSideIndex].X * size + 500;
+                highlight.Y1 = data.BasePoints[_selectedSideIndex].Y * size + 500;
+                highlight.X2 = data.BasePoints[next].X * size + 500;
+                highlight.Y2 = data.BasePoints[next].Y * size + 500;
+            }
+            else if (highlight != null)
+            {
+                highlight.Visibility = Visibility.Collapsed;
+            }
+
             UpdateBoundingBox(container);   
         }
         private void UpdateBoundingBox(Canvas container)
@@ -695,7 +793,6 @@ namespace Lab1
 
                 if (data.BasePoints != null) // Многоугольник
                 {
-                    double maxThick = data.CurrentThicknesses.Max(); // Учитываем толщину обводки
                     foreach (var bp in data.BasePoints)
                     {
                         double px = bp.X * data.CurrentSize + 500;
@@ -705,23 +802,48 @@ namespace Lab1
                         if (py < minY) minY = py;
                         if (py > maxY) maxY = py;
                     }
-                    //minX -= maxThick / 2; maxX += maxThick / 2;
-                    //minY -= maxThick / 2; maxY += maxThick / 2;
                 }
                 else // Окружность
                 {
-                    double thick = container.Children.OfType<Ellipse>().FirstOrDefault()?.StrokeThickness ?? 0;
                     minX = 500 - data.CurrentSize;
                     maxX = 500 + data.CurrentSize;
                     minY = 500 - data.CurrentSize;
                     maxY = 500 + data.CurrentSize;
                 }
 
-                // Задаем отступ рамки (2 пикселя)
-                Canvas.SetLeft(bbox, minX - 4);
-                Canvas.SetTop(bbox, minY - 4);
-                bbox.Width = Math.Max(0, maxX - minX + 8);
-                bbox.Height = Math.Max(0, maxY - minY + 8);
+                // Устанавливаем координаты строго по границе (без отступов -2 и +4)
+                Canvas.SetLeft(bbox, minX);
+                Canvas.SetTop(bbox, minY);
+                bbox.Width = Math.Max(0, maxX - minX);
+                bbox.Height = Math.Max(0, maxY - minY);
+            }
+        }
+        // Обновляет текстовые поля смежных сторон без потери фокуса
+        private void SyncMenuLengths(ShapeData data, int skipIndex)
+        {
+            if (data.BasePoints == null || data.SideLengths == null) return;
+
+            int n = data.BasePoints.Length;
+            for (int i = 0; i < n; i++)
+            {
+                // Пропускаем ту сторону, ползунок которой мы сейчас тянем
+                if (i == skipIndex) continue;
+
+                // Вычисляем фактическую длину смежных сторон по новым точкам на экране
+                int next = (i + 1) % n;
+                double dx = data.BasePoints[next].X - data.BasePoints[i].X;
+                double dy = data.BasePoints[next].Y - data.BasePoints[i].Y;
+                double actualLen = Math.Sqrt(dx * dx + dy * dy) * data.CurrentSize;
+
+                // Синхронизируем базовый массив, чтобы он не конфликтовал при следующем обновлении
+                data.SideLengths[i] = actualLen;
+
+                // Безболезненно обновляем цифры в UI меню
+                if (_lenSliders.ContainsKey(i) && _lenBoxes.ContainsKey(i))
+                {
+                    _lenSliders[i].Value = actualLen;
+                    _lenBoxes[i].Text = Math.Round(actualLen).ToString();
+                }
             }
         }
     }

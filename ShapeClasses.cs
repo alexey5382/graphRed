@@ -150,20 +150,48 @@ namespace Lab1
                 Width = 1000,
                 Height = 1000,
                 Background = null,
-                Tag = new ShapeData { BasePoints = null, CurrentSize = size }
+                Tag = new ShapeData
+                {
+                    BasePoints = null,
+                    CurrentSize = size,
+                    CurrentThicknesses = SideThicknesses.ToArray(),
+                    CurrentColors = SideColors.ToArray(),
+                    LocalAnchor = new Point(500, 500) // Инициализируем локальную точку привязки
+                }
             };
 
+            double t = SideThicknesses[0];
             Ellipse ellipse = new Ellipse
             {
-                Width = size * 2,
+                Width = size * 2, // НИКАКОЙ математики с вычетом толщины!
                 Height = size * 2,
                 Stroke = SideColors[0],
-                StrokeThickness = SideThicknesses[0],
-                Fill = FillColor // Применяем заливку
+                StrokeThickness = t,
+                Fill = FillColor
             };
-            Canvas.SetLeft(ellipse, 500 - size);
+
+            Canvas.SetLeft(ellipse, 500 - size); // НИКАКИХ смещений!
             Canvas.SetTop(ellipse, 500 - size);
             shapeContainer.Children.Add(ellipse);
+
+            // Добавляем кругу точку привязки, чтобы его можно было таскать за центр
+            Ellipse anchor = new Ellipse
+            {
+                Width = 14,
+                Height = 14,
+                Fill = Brushes.Cyan,
+                Stroke = Brushes.White,
+                StrokeThickness = 2,
+                Tag = "Anchor",
+                Cursor = Cursors.Cross,
+                Visibility = Visibility.Collapsed,
+                IsHitTestVisible = true
+            };
+            Canvas.SetLeft(anchor, 500 - 7);
+            Canvas.SetTop(anchor, 500 - 7);
+            Panel.SetZIndex(anchor, 9999);
+            shapeContainer.Children.Add(anchor);
+
             return shapeContainer;
         }
     }
