@@ -28,6 +28,26 @@
             <Setter Property="Margin" Value="0,10,0,5"/>
             <Setter Property="TextOptions.TextFormattingMode" Value="Display"/>
         </Style>
+        <Style x:Key="ModalButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="10"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Opacity" Value="0.8"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -75,6 +95,84 @@
                                 MouseMove="MainCanvas_MouseMove"/>
                     </Border>
                 </ScrollViewer>
+                <Grid x:Name="CreationModal" Background="#80000000" Visibility="Collapsed" Grid.RowSpan="4" Panel.ZIndex="10000">
+                    <Border Background="#2D2D2D" BorderBrush="#555555" BorderThickness="1" CornerRadius="8" 
+                    HorizontalAlignment="Center" VerticalAlignment="Center" Padding="20" Width="460" Height="500">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,15">
+                                <TextBlock x:Name="CreationTitle" Text="СОЗДАНИЕ ФИГУРЫ" Foreground="White" FontWeight="Bold" FontSize="16" VerticalAlignment="Center"/>
+                                <Button Content="🎲 Случайные параметры" HorizontalAlignment="Right" Background="#007ACC" Foreground="White" Padding="8,4" BorderThickness="0" Click="RandomizeCreation_Click">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="3"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="ЦВЕТ ЗАЛИВКИ:" Foreground="#969696" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <ComboBox x:Name="CreationFillColorCombo" Grid.Column="1" Background="#373738" BorderBrush="#555" Foreground="White" Width="90" HorizontalAlignment="Left"/>
+                            </Grid>
+
+                            <TextBlock Text="НАСТРОЙКИ СТОРОН:" Foreground="#969696" FontSize="11" Margin="0,0,0,5"/>
+                            <ScrollViewer VerticalScrollBarVisibility="Hidden" Height="140" Margin="0,0,0,15">
+                                <StackPanel x:Name="CreationSidesPanel"/>
+                            </ScrollViewer>
+
+                            <TextBlock Text="МЕТОД ПОСТРОЕНИЯ:" Foreground="#969696" FontSize="11" Margin="0,0,0,5"/>
+                            <TabControl Background="Transparent" BorderThickness="0" Foreground="White">
+                                <TabItem Header="Рисование на холсте" Background="#3E3E42" Foreground="White">
+                                    <StackPanel>
+                                        <RadioButton x:Name="DrawModeCenter" Content="От центра (точка 1 - центр)" Foreground="White" IsChecked="True" Margin="0,0,0,5"/>
+                                        <RadioButton x:Name="DrawModeCorner" Content="От угла (точка 1 - угол)" Foreground="White" Margin="0,0,0,15"/>
+                                        <Button Style="{StaticResource ModalButton}" Content="Нарисовать мышью" Background="#007ACC" Click="StartInteractiveCreation_Click"/>
+                                    </StackPanel>
+                                </TabItem>
+
+                                <TabItem Header="Точные размеры" Background="#3E3E42" Foreground="White">
+                                    <StackPanel>
+                                        <Grid Margin="0,0,0,5">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition/>
+                                                <ColumnDefinition/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Margin="0,0,5,0">
+                                                <TextBlock Text="Ширина (Size X):" Foreground="#CCC" FontSize="11"/>
+                                                <TextBox x:Name="ManualWidthBox" Text="150" Background="#1E1E1E" Foreground="White" BorderThickness="1" BorderBrush="#555" TextChanged="Validation_TextChanged"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="5,0,0,0">
+                                                <TextBlock Text="Высота (Size Y):" Foreground="#CCC" FontSize="11"/>
+                                                <TextBox x:Name="ManualHeightBox" Text="150" Background="#1E1E1E" Foreground="White" BorderThickness="1" BorderBrush="#555" TextChanged="Validation_TextChanged"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <Grid Margin="0,0,0,15">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition/>
+                                                <ColumnDefinition/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Margin="0,0,5,0">
+                                                <TextBlock Text="Центр X:" Foreground="#CCC" FontSize="11"/>
+                                                <TextBox x:Name="ManualCenterXBox" Text="400" Background="#1E1E1E" Foreground="White" BorderThickness="1" BorderBrush="#555" TextChanged="Validation_TextChanged"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="5,0,0,0">
+                                                <TextBlock Text="Центр Y:" Foreground="#CCC" FontSize="11"/>
+                                                <TextBox x:Name="ManualCenterYBox" Text="300" Background="#1E1E1E" Foreground="White" BorderThickness="1" BorderBrush="#555" TextChanged="Validation_TextChanged"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <Button Style="{StaticResource ModalButton}" Content="Создать на холсте" Background="#007ACC" Click="ManualCreation_Click"/>
+                                    </StackPanel>
+                                </TabItem>
+                            </TabControl>
+
+                            <Button Style="{StaticResource ModalButton}" Content="Отмена" Background="#4A4A4C" Margin="0,10,0,0" Click="CancelCreation_Click"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Grid>
 
             <Border x:Name="PropertiesPanel" Grid.Column="2" Background="#333333" BorderBrush="#1E1E1E" BorderThickness="1,1,0,0" Visibility="Collapsed">
@@ -98,7 +196,7 @@
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
                                     
-                                    <Slider x:Name="GlobalSizeSlider" Minimum="10" Maximum="300" Value="100" 
+                                    <Slider x:Name="GlobalSizeSlider" Minimum="1" Maximum="100" Value="50" 
                                             ValueChanged="GlobalSize_Changed" VerticalAlignment="Center"/>
                                     <TextBox x:Name="GlobalSizeBox" Grid.Column="1" Text="100" 
                                              Background="#252526" Foreground="White" BorderThickness="1" BorderBrush="#555555"
@@ -106,7 +204,7 @@
                                 </Grid>
                                 <TextBlock Text="Цвет заливки:" Foreground="#CCCCCC" FontSize="11" Margin="0,10,0,5"/>
                                 <ComboBox x:Name="FillColorCombo" Background="#252526" Foreground="White" 
-                  SelectionChanged="FillColorCombo_SelectionChanged">
+                                          SelectionChanged="FillColorCombo_SelectionChanged">
                                 </ComboBox>
                             </StackPanel>
                             
@@ -127,7 +225,17 @@
 
                         <Separator Background="#444444" Margin="0,20"/>
 
-                        <TextBlock Text="ПАРАМЕТРЫ СТОРОН" Style="{StaticResource PanelHeader}"/>
+                        <Grid Margin="0,10,0,5">
+                            <TextBlock Text="ПАРАМЕТРЫ СТОРОН" Style="{StaticResource PanelHeader}" Margin="0" VerticalAlignment="Center"/>
+                            <Button Content="🎲 Случайные" HorizontalAlignment="Right" Background="#007ACC" Foreground="White" Padding="8,2" BorderThickness="0" Click="RandomizeShapeSides_Click" Cursor="Hand">
+                                <Button.Resources>
+                                    <Style TargetType="Border">
+                                        <Setter Property="CornerRadius" Value="3"/>
+                                    </Style>
+                                </Button.Resources>
+                            </Button>
+                        </Grid>
+
                         <StackPanel x:Name="SidePropertiesList">
                         </StackPanel>
                     </StackPanel>
