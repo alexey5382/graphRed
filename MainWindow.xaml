@@ -56,7 +56,7 @@
                     <Button Style="{StaticResource ToolButton}" Content="⬠" Click="AddShape_Click" Tag="Pent" ToolTip="Пятиугольник"/>
                     <Button Style="{StaticResource ToolButton}" Content="⏥" Click="AddShape_Click" Tag="Trap" ToolTip="Трапеция"/>
                     <Button Style="{StaticResource ToolButton}" Content="○" Click="AddShape_Click" Tag="Circ" ToolTip="Окружность"/>
-
+                    <Button Style="{StaticResource ToolButton}" Content="〰" Click="AddShape_Click" Tag="Custom" ToolTip="Произвольная ломаная (отрезки)"/>
                     <Separator Background="#444444" Margin="10,10"/>
 
                     

@@ -21,6 +21,11 @@ namespace Lab1
         private int _selectedSideIndex = -1; // -1 означает, что выбрана вся фигура
         private Dictionary<int, TextBox> _lenBoxes = new Dictionary<int, TextBox>();
         private Dictionary<int, Slider> _lenSliders = new Dictionary<int, Slider>();
+        // --- Переменные для режима рисования ---
+        private bool _isDrawingMode = false;
+        private List<Point> _drawingPoints = new List<Point>();
+        private Line _previewLine;
+        private TextBlock _drawingInfoText;
 
         private readonly List<Brush> _availableColors = new List<Brush> {
             Brushes.Black, Brushes.Red, Brushes.Orange, Brushes.Yellow, Brushes.Green, Brushes.Blue, Brushes.Purple, Brushes.White
@@ -52,6 +57,7 @@ namespace Lab1
         private void AddShape_Click(object sender, RoutedEventArgs e)
         {
             string type = (sender as Button).Tag.ToString();
+            if (type == "Custom") { StartDrawingMode(); return; }
 
             // Создаем по центру экрана
             double centerX = MainCanvas.ActualWidth / 2 > 0 ? MainCanvas.ActualWidth / 2 : 400;
@@ -136,8 +142,11 @@ namespace Lab1
                 _isUpdating = false;
             }
 
-            int sides = _selectedElement.Children.OfType<Polygon>().Count(p => p.Tag?.ToString() == "Stroke");
-            if (sides == 0) sides = 1;
+            int sides = 1;
+            if (_selectedElement.Tag is ShapeData sd && sd.BasePoints != null)
+            {
+                sides = sd.IsClosed ? sd.BasePoints.Length : sd.BasePoints.Length - 1;
+            }
             GenerateSideMenu(_selectedElement, sides);
         }
 
@@ -568,6 +577,36 @@ namespace Lab1
         // --- Логика перетаскивания (MouseDown, MouseMove, MouseUp) ---
         private void MainCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            if (_isDrawingMode)
+            {
+                Point p = e.GetPosition(MainCanvas);
+                if (_drawingPoints.Count > 0 && Keyboard.IsKeyDown(Key.LeftShift)) p = GetSnappedPoint(_drawingPoints.Last(), p);
+
+                _drawingPoints.Add(p);
+
+                // Отрисовка зафиксированной точки
+                Ellipse dot = new Ellipse { Width = 8, Height = 8, Fill = Brushes.Cyan, Tag = "DrawingTemp" };
+                Canvas.SetLeft(dot, p.X - 4);
+                Canvas.SetTop(dot, p.Y - 4);
+                MainCanvas.Children.Add(dot);
+
+                if (_drawingPoints.Count == 1)
+                {
+                    _previewLine.X1 = p.X; _previewLine.Y1 = p.Y;
+                    _previewLine.X2 = p.X; _previewLine.Y2 = p.Y;
+                    _previewLine.Visibility = Visibility.Visible;
+                    _drawingInfoText.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    // Отрисовка зафиксированного отрезка ЧЕРНЫМ цветом
+                    Line solidLine = new Line { X1 = _drawingPoints[_drawingPoints.Count - 2].X, Y1 = _drawingPoints[_drawingPoints.Count - 2].Y, X2 = p.X, Y2 = p.Y, Stroke = Brushes.Black, StrokeThickness = 2, Tag = "DrawingTemp" };
+                    MainCanvas.Children.Add(solidLine);
+                    _previewLine.X1 = p.X; _previewLine.Y1 = p.Y;
+                }
+                e.Handled = true;
+                return;
+            }
             if (e.Source == MainCanvas)
             {
                 DeselectAll();
@@ -627,6 +666,21 @@ namespace Lab1
 
         private void MainCanvas_MouseMove(object sender, MouseEventArgs e)
         {
+            if (_isDrawingMode && _drawingPoints.Count > 0)
+            {
+                Point currentPoint = e.GetPosition(MainCanvas);
+                Point lastPoint = _drawingPoints.Last();
+                if (Keyboard.IsKeyDown(Key.LeftShift)) currentPoint = GetSnappedPoint(lastPoint, currentPoint);
+
+                _previewLine.X2 = currentPoint.X;
+                _previewLine.Y2 = currentPoint.Y;
+
+                double len = Math.Round((currentPoint - lastPoint).Length);
+                _drawingInfoText.Text = $"X: {Math.Round(currentPoint.X)} Y: {Math.Round(currentPoint.Y)}\nДлина: {len}";
+                Canvas.SetLeft(_drawingInfoText, currentPoint.X + 15);
+                Canvas.SetTop(_drawingInfoText, currentPoint.Y + 15);
+                return;
+            }
             if (_draggedAnchor != null && _selectedElement != null)
             {
                 Point p = e.GetPosition(_selectedElement);
@@ -707,59 +761,93 @@ namespace Lab1
 
             int n = data.BasePoints.Length;
             double size = data.CurrentSize;
-            // 1. Координаты в пикселях
             Point[] pts = new Point[n];
             for (int i = 0; i < n; i++)
                 pts[i] = new Point(data.BasePoints[i].X * size + 500, data.BasePoints[i].Y * size + 500);
 
-            // 2. Обновляем зону заливки
             var hitArea = container.Children.OfType<Polygon>().FirstOrDefault(p => p.Tag?.ToString() == "HitArea");
             if (hitArea != null) hitArea.Points = new PointCollection(pts);
 
             Point[] outer = new Point[n];
             Point[] inner = new Point[n];
 
-            // 3. Вычисляем стыки (биссектрисы)
-            for (int i = 0; i < n; i++)
+            if (data.IsClosed)
             {
-                int prev = (i - 1 + n) % n;
-                int next = (i + 1) % n;
-
-                Vector dIn = pts[i] - pts[prev]; dIn.Normalize();
-                Vector dOut = pts[next] - pts[i]; dOut.Normalize();
-
-                // Нормали наружу (для WPF Y направлен вниз)
-                Vector nIn = new Vector(dIn.Y, -dIn.X);
-                Vector nOut = new Vector(dOut.Y, -dOut.X);
-
-                double tIn = data.CurrentThicknesses[prev];
-                double tOut = data.CurrentThicknesses[i];
-
-                // Находим внешние точки стыка
-                // Находим внешние точки стыка (теперь они строго на базовых линиях)
-                Point pOuterIn = pts[i];
-                Point pOuterOut = pts[i];
-                outer[i] = GetIntersection(pOuterIn, dIn, pOuterOut, dOut, pOuterIn);
-
-                // Находим внутренние точки стыка (смещаем на ПОЛНУЮ толщину tIn/tOut)
-                Point pInnerIn = pts[i] - nIn * tIn;
-                Point pInnerOut = pts[i] - nOut * tOut;
-                inner[i] = GetIntersection(pInnerIn, dIn, pInnerOut, dOut, pInnerIn);
-            }
-
-            // 4. Применяем формы и цвета к полигонам-сторонам
-            var strokePolygons = container.Children.OfType<Polygon>().Where(p => p.Tag?.ToString() == "Stroke").ToList();
-            for (int i = 0; i < n; i++)
-            {
-                if (i < strokePolygons.Count)
+                // ЛОГИКА ДЛЯ ЗАМКНУТЫХ ФИГУР (Биссектрисы)
+                for (int i = 0; i < n; i++)
                 {
+                    int prev = (i - 1 + n) % n;
                     int next = (i + 1) % n;
-                    strokePolygons[i].Points = new PointCollection(new[] { outer[i], outer[next], inner[next], inner[i] });
-                    strokePolygons[i].Fill = data.CurrentColors[i];
+
+                    Vector dIn = pts[i] - pts[prev]; dIn.Normalize();
+                    Vector dOut = pts[next] - pts[i]; dOut.Normalize();
+                    Vector nIn = new Vector(dIn.Y, -dIn.X);
+                    Vector nOut = new Vector(dOut.Y, -dOut.X);
+
+                    double tIn = data.CurrentThicknesses[prev];
+                    double tOut = data.CurrentThicknesses[i];
+
+                    outer[i] = GetIntersection(pts[i], dIn, pts[i], dOut, pts[i]);
+                    inner[i] = GetIntersection(pts[i] - nIn * tIn, dIn, pts[i] - nOut * tOut, dOut, pts[i] - nIn * tIn);
                 }
             }
+            else
+            {
+                // ЛОГИКА ДЛЯ НЕЗАМКНУТОЙ ЛОМАНОЙ (Прямые концы и перпендикуляры)
+                for (int i = 0; i < n; i++)
+                {
+                    if (i == 0) // Торец начала
+                    {
+                        Vector d = pts[1] - pts[0]; d.Normalize();
+                        Vector norm = new Vector(d.Y, -d.X);
+                        outer[0] = pts[0];
+                        inner[0] = pts[0] - norm * data.CurrentThicknesses[0];
+                    }
+                    else if (i == n - 1) // Торец конца
+                    {
+                        Vector d = pts[n - 1] - pts[n - 2]; d.Normalize();
+                        Vector norm = new Vector(d.Y, -d.X);
+                        outer[n - 1] = pts[n - 1];
+                        inner[n - 1] = pts[n - 1] - norm * data.CurrentThicknesses[n - 2]; // толщина последнего реального отрезка
+                    }
+                    else // Внутренние стыки
+                    {
+                        Vector dIn = pts[i] - pts[i - 1]; dIn.Normalize();
+                        Vector dOut = pts[i + 1] - pts[i]; dOut.Normalize();
+                        Vector nIn = new Vector(dIn.Y, -dIn.X);
+                        Vector nOut = new Vector(dOut.Y, -dOut.X);
+
+                        double tIn = data.CurrentThicknesses[i - 1];
+                        double tOut = data.CurrentThicknesses[i];
+
+                        outer[i] = GetIntersection(pts[i], dIn, pts[i], dOut, pts[i]);
+                        inner[i] = GetIntersection(pts[i] - nIn * tIn, dIn, pts[i] - nOut * tOut, dOut, pts[i] - nIn * tIn);
+                    }
+                }
+            }
+
+            // Применяем геометрию к полигонам (цикл строго до segmentsCount, чтобы избежать выхода за пределы массива)
+            int segmentsCount = data.IsClosed ? n : n - 1;
+            var strokePolygons = container.Children.OfType<Polygon>().Where(p => p.Tag?.ToString() == "Stroke").ToList();
+
+            for (int i = 0; i < strokePolygons.Count; i++)
+            {
+                if (i < segmentsCount)
+                {
+                    int next = data.IsClosed ? (i + 1) % n : i + 1;
+                    strokePolygons[i].Points = new PointCollection(new[] { outer[i], outer[next], inner[next], inner[i] });
+                    strokePolygons[i].Fill = data.CurrentColors[i];
+                    strokePolygons[i].Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    strokePolygons[i].Visibility = Visibility.Collapsed;
+                }
+            }
+
+            // Логика подсветки выбранной стороны (SideHighlight)
             var highlight = container.Children.OfType<Line>().FirstOrDefault(l => l.Tag?.ToString() == "SideHighlight");
-            if (container == _selectedElement && _selectedSideIndex >= 0 && _selectedSideIndex < n && data.CurrentThicknesses != null)
+            if (container == _selectedElement && _selectedSideIndex >= 0 && _selectedSideIndex < segmentsCount && data.CurrentThicknesses != null)
             {
                 if (highlight == null)
                 {
@@ -769,7 +857,7 @@ namespace Lab1
                 }
                 highlight.Visibility = Visibility.Visible;
 
-                int next = (_selectedSideIndex + 1) % n;
+                int next = data.IsClosed ? (_selectedSideIndex + 1) % n : _selectedSideIndex + 1;
                 highlight.X1 = data.BasePoints[_selectedSideIndex].X * size + 500;
                 highlight.Y1 = data.BasePoints[_selectedSideIndex].Y * size + 500;
                 highlight.X2 = data.BasePoints[next].X * size + 500;
@@ -780,7 +868,7 @@ namespace Lab1
                 highlight.Visibility = Visibility.Collapsed;
             }
 
-            UpdateBoundingBox(container);   
+            UpdateBoundingBox(container);
         }
         private void UpdateBoundingBox(Canvas container)
         {
@@ -823,28 +911,142 @@ namespace Lab1
         {
             if (data.BasePoints == null || data.SideLengths == null) return;
 
-            int n = data.BasePoints.Length;
-            for (int i = 0; i < n; i++)
+            int segmentsCount = data.IsClosed ? data.BasePoints.Length : data.BasePoints.Length - 1;
+            for (int i = 0; i < segmentsCount; i++)
             {
-                // Пропускаем ту сторону, ползунок которой мы сейчас тянем
                 if (i == skipIndex) continue;
 
-                // Вычисляем фактическую длину смежных сторон по новым точкам на экране
-                int next = (i + 1) % n;
+                int next = data.IsClosed ? (i + 1) % data.BasePoints.Length : i + 1;
+
                 double dx = data.BasePoints[next].X - data.BasePoints[i].X;
                 double dy = data.BasePoints[next].Y - data.BasePoints[i].Y;
                 double actualLen = Math.Sqrt(dx * dx + dy * dy) * data.CurrentSize;
 
-                // Синхронизируем базовый массив, чтобы он не конфликтовал при следующем обновлении
                 data.SideLengths[i] = actualLen;
 
-                // Безболезненно обновляем цифры в UI меню
                 if (_lenSliders.ContainsKey(i) && _lenBoxes.ContainsKey(i))
                 {
                     _lenSliders[i].Value = actualLen;
                     _lenBoxes[i].Text = Math.Round(actualLen).ToString();
                 }
             }
+        }
+        // ЗАМЕНИ свой старый метод OnKeyDown на этот:
+        protected override void OnPreviewKeyDown(KeyEventArgs e)
+        {
+            base.OnPreviewKeyDown(e);
+
+            if (_isDrawingMode)
+            {
+                if (e.Key == Key.Enter)
+                {
+                    FinishDrawing(false);      // Enter - открытая ломаная
+                    e.Handled = true;          // ВАЖНО: запрещаем кнопке нажиматься от Enter
+                }
+                else if (e.Key == Key.Tab)
+                {
+                    FinishDrawing(true);       // Tab - замкнутая фигура
+                    e.Handled = true;          // Блокируем перенос фокуса на другие элементы
+                }
+                else if (e.Key == Key.Escape)
+                {
+                    CancelDrawing();           // Отмена
+                    e.Handled = true;
+                }
+            }
+        }
+        private void StartDrawingMode()
+        {
+            DeselectAll();
+            CancelDrawing(); // Очищаем всё перед новым рисованием
+
+            _isDrawingMode = true;
+            _drawingPoints.Clear();
+            MainCanvas.Cursor = Cursors.Cross;
+
+            // Обязательно добавляем Tag="DrawingTemp"
+            _previewLine = new Line { Stroke = Brushes.Gray, StrokeThickness = 2, StrokeDashArray = new DoubleCollection { 4, 4 }, Visibility = Visibility.Collapsed, Tag = "DrawingTemp" };
+            MainCanvas.Children.Add(_previewLine);
+
+            _drawingInfoText = new TextBlock { Foreground = Brushes.White, Background = new SolidColorBrush(Color.FromArgb(200, 30, 30, 30)), Padding = new Thickness(4), Visibility = Visibility.Collapsed, Tag = "DrawingTemp" };
+            Panel.SetZIndex(_drawingInfoText, 10000);
+            MainCanvas.Children.Add(_drawingInfoText);
+
+            // ВОТ ОНО: Забираем фокус клавиатуры у кнопки и отдаем окну, чтобы работал Enter!
+            this.Focus();
+        }
+
+        private void CancelDrawing()
+        {
+            _isDrawingMode = false;
+            MainCanvas.Cursor = Cursors.Arrow;
+            // Теперь мы удаляем абсолютно все временные объекты по тегу
+            var tempItems = MainCanvas.Children.OfType<FrameworkElement>().Where(x => x.Tag?.ToString() == "DrawingTemp").ToList();
+            foreach (var item in tempItems) MainCanvas.Children.Remove(item);
+        }
+
+        private void FinishDrawing(bool isClosed)
+        {
+            // Убираем случайные двойные клики (точки слишком близко)
+            var cleanPoints = new List<Point>();
+            foreach (var p in _drawingPoints)
+            {
+                if (cleanPoints.Count == 0 || (p - cleanPoints.Last()).Length > 2)
+                    cleanPoints.Add(p);
+            }
+
+            if (cleanPoints.Count < 2) { CancelDrawing(); return; }
+
+            double minX = cleanPoints.Min(p => p.X); double maxX = cleanPoints.Max(p => p.X);
+            double minY = cleanPoints.Min(p => p.Y); double maxY = cleanPoints.Max(p => p.Y);
+
+            double width = maxX - minX; double height = maxY - minY;
+            double size = Math.Max(width, height) / 2;
+            if (size < 1) size = 50;
+
+            double centerX = minX + width / 2;
+            double centerY = minY + height / 2;
+
+            Point[] basePoints = new Point[cleanPoints.Count];
+            for (int i = 0; i < cleanPoints.Count; i++)
+            {
+                basePoints[i] = new Point((cleanPoints[i].X - centerX) / size, (cleanPoints[i].Y - centerY) / size);
+            }
+
+            int segmentsCount = isClosed ? basePoints.Length : basePoints.Length - 1;
+
+            var defaultColors = Enumerable.Repeat<Brush>(Brushes.Black, segmentsCount).ToList();
+            var defaultThicks = Enumerable.Repeat(4.0, segmentsCount).ToList();
+
+            CancelDrawing();
+
+            MyShape shape;
+            if (isClosed)
+            {
+                Brush defaultFill = new SolidColorBrush(Color.FromArgb(100, 200, 200, 200));
+                shape = new MyCustomPolygon(new Point(0, 0), basePoints, true, defaultColors, defaultThicks, defaultFill);
+            }
+            else
+            {
+                shape = new MyPolyline(new Point(0, 0), basePoints, defaultColors, defaultThicks);
+            }
+
+            var visual = (Canvas)shape.CreateVisual(size);
+
+            Canvas.SetLeft(visual, centerX - 500);
+            Canvas.SetTop(visual, centerY - 500);
+
+            UpdatePolygonGeometry(visual);
+            MainCanvas.Children.Add(visual);
+            SelectShape(visual);
+        }
+        private Point GetSnappedPoint(Point start, Point current)
+        {
+            Vector v = current - start;
+            double angle = Math.Atan2(v.Y, v.X);
+            double snapAngle = Math.Round(angle / (Math.PI / 12)) * (Math.PI / 12); // Кратность 15 градусам (Pi / 12)
+            double len = v.Length;
+            return new Point(start.X + len * Math.Cos(snapAngle), start.Y + len * Math.Sin(snapAngle));
         }
     }
 }
