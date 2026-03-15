@@ -280,6 +280,7 @@ namespace Lab1
     }
     public class ShapeData
     {
+        public string GroupId { get; set; } // <--- НОВОЕ СВОЙСТВО
         public bool IsClosed { get; set; } = true;
         public Point[] OriginalBasePoints { get; set; }
         public Point[] BasePoints { get; set; }
@@ -290,5 +291,12 @@ namespace Lab1
         public double[] CurrentThicknesses { get; set; }
         public Brush[] CurrentColors { get; set; }
         public Point LocalAnchor { get; set; } = new Point(500, 500);
+    }
+    public class ShapeGroup
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+        public string Name { get; set; } = "Новая группа";
+        // Единая точка привязки для всей группы (в абсолютных координатах холста)
+        public Point GroupAnchor { get; set; }
     }
 }

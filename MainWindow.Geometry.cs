@@ -266,8 +266,70 @@ namespace Lab1
                 container.Children.Add(rh);
             }
         }
+        // Создание и обновление единой рамки для мульти-выделения и групп
+        private void UpdateGlobalSelectionUI()
+        {
+            if (_globalBoundingBox == null)
+            {
+                _globalBoundingBox = new Rectangle { StrokeThickness = 2, StrokeDashArray = new DoubleCollection { 4, 4 }, IsHitTestVisible = false };
+                Panel.SetZIndex(_globalBoundingBox, 9998);
+                MainCanvas.Children.Add(_globalBoundingBox);
+            }
+            if (_globalAnchor == null)
+            {
+                _globalAnchor = new Ellipse { Width = 14, Height = 14, Fill = Brushes.Orange, Stroke = Brushes.White, StrokeThickness = 2, Tag = "GlobalAnchor", Cursor = Cursors.Cross };
+                Panel.SetZIndex(_globalAnchor, 9999);
+                MainCanvas.Children.Add(_globalAnchor);
+            }
 
+            if (_selectedElements.Count <= 1)
+            {
+                _globalBoundingBox.Visibility = Visibility.Collapsed;
+                _globalAnchor.Visibility = Visibility.Collapsed;
+                return;
+            }
 
+            // --- ФИКС: Черный цвет для мульти-выбора, синий для групп ---
+            string firstGroupId = (_selectedElements[0].Tag as ShapeData)?.GroupId;
+            bool isFormalGroup = !string.IsNullOrEmpty(firstGroupId) && _selectedElements.All(e => (e.Tag as ShapeData)?.GroupId == firstGroupId);
+            _globalBoundingBox.Stroke = isFormalGroup ? Brushes.DodgerBlue : Brushes.Black;
+
+            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+
+            foreach (var container in _selectedElements)
+            {
+                var bbox = container.Children.OfType<Rectangle>().FirstOrDefault(r => r.Tag?.ToString() == "BoundingBox");
+                if (bbox != null)
+                {
+                    double left = Canvas.GetLeft(bbox) + Canvas.GetLeft(container);
+                    double top = Canvas.GetTop(bbox) + Canvas.GetTop(container);
+                    if (left < minX) minX = left;
+                    if (left + bbox.Width > maxX) maxX = left + bbox.Width;
+                    if (top < minY) minY = top;
+                    if (top + bbox.Height > maxY) maxY = top + bbox.Height;
+                }
+                if (bbox != null) bbox.Visibility = Visibility.Collapsed;
+                var handles = container.Children.OfType<FrameworkElement>().Where(x => x.Tag?.ToString().StartsWith("Vertex_") == true || x.Tag?.ToString().StartsWith("Resize_") == true || x.Tag?.ToString() == "Anchor").ToList();
+                foreach (var h in handles) h.Visibility = Visibility.Collapsed;
+            }
+
+            Canvas.SetLeft(_globalBoundingBox, minX);
+            Canvas.SetTop(_globalBoundingBox, minY);
+            _globalBoundingBox.Width = maxX - minX;
+            _globalBoundingBox.Height = maxY - minY;
+            _globalBoundingBox.Visibility = Visibility.Visible;
+
+            Point anchorPt = new Point((minX + maxX) / 2, (minY + maxY) / 2);
+            if (isFormalGroup)
+            {
+                var group = _shapeGroups.FirstOrDefault(g => g.Id == firstGroupId);
+                if (group != null) anchorPt = group.GroupAnchor;
+            }
+
+            Canvas.SetLeft(_globalAnchor, anchorPt.X - 7);
+            Canvas.SetTop(_globalAnchor, anchorPt.Y - 7);
+            _globalAnchor.Visibility = Visibility.Visible;
+        }
 
     }
 }

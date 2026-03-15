@@ -57,6 +57,15 @@ namespace Lab1
         private double _resizeMaxY;
         private Dictionary<int, TextBox> _coordXBoxes = new Dictionary<int, TextBox>();
         private Dictionary<int, TextBox> _coordYBoxes = new Dictionary<int, TextBox>();
+        // --- Переменные для мульти-выделения и Групп ---
+        private List<Canvas> _selectedElements = new List<Canvas>(); // Теперь выделенных элементов может быть много!
+        private bool _isSelecting = false;
+        private Point _selectionStartPoint;
+        private Rectangle _selectionBox;
+        // --- Переменные для Групп и глобальной рамки ---
+        private List<ShapeGroup> _shapeGroups = new List<ShapeGroup>();
+        private Rectangle _globalBoundingBox;
+        private Ellipse _globalAnchor;
 
         private readonly List<Brush> _availableColors = new List<Brush> {
             Brushes.Black, Brushes.Red, Brushes.Orange, Brushes.Yellow, Brushes.Green, Brushes.Blue, Brushes.Purple, Brushes.White

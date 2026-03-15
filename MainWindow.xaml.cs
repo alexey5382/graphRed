@@ -36,104 +36,145 @@ namespace Lab1
                 CoordYText.Text = $"Y: {Math.Round(absY)}";
             }
         }
-        private void SelectShape(Canvas shapeCanvas)
+        private void SelectShape(Canvas shapeContainer, bool multiSelect = false)
         {
-            // Снимаем выделение с предыдущей фигуры
-            DeselectAll();
+            if (shapeContainer == null) return;
 
-            _selectedElement = shapeCanvas;
-            _selectedElement.Opacity = 1;
-            PropertiesPanel.Visibility = Visibility.Visible;
-            CreateHandles(_selectedElement);
-            UpdateBoundingBox(_selectedElement);
-            var anchor = _selectedElement.Children.OfType<Ellipse>().FirstOrDefault(a => a.Tag?.ToString() == "Anchor");
-            if (anchor != null) anchor.Visibility = Visibility.Visible;
+            if (!multiSelect && !Keyboard.IsKeyDown(Key.LeftShift)) DeselectAll();
 
-            // --- ЛОГИКА ПУНКТИРНОЙ ОБВОДКИ ---
-            var bbox = _selectedElement.Children.OfType<Rectangle>().FirstOrDefault(r => r.Tag?.ToString() == "BoundingBox");
+            if (!_selectedElements.Contains(shapeContainer)) _selectedElements.Add(shapeContainer);
+
+            _selectedElement = shapeContainer;
+            _selectedSideIndex = -1;
+
+            var bbox = shapeContainer.Children.OfType<Rectangle>().FirstOrDefault(r => r.Tag?.ToString() == "BoundingBox");
             if (bbox == null)
             {
-                bbox = new Rectangle
-                {
-                    Tag = "BoundingBox",
-                    Stroke = Brushes.Black,
-                    StrokeThickness = 1.5,
-                    StrokeDashArray = new DoubleCollection { 4, 6 }, // Длина штриха и пробела
-                    Fill = Brushes.Transparent,
-                    IsHitTestVisible = false // Чтобы клики проходили сквозь рамку
-                };
-                Panel.SetZIndex(bbox, 100); // Поверх самой фигуры
-                _selectedElement.Children.Add(bbox);
+                bbox = new Rectangle { Stroke = Brushes.Gray, StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 5, 5 }, Tag = "BoundingBox", IsHitTestVisible = false };
+                shapeContainer.Children.Add(bbox);
             }
             bbox.Visibility = Visibility.Visible;
-            UpdateBoundingBox(_selectedElement);
-            // ---------------------------------
 
-            UpdateCoordinatesUI();
+            // --- ФИКС: Делаем точку привязки видимой при выделении! ---
+            var anchor = shapeContainer.Children.OfType<Ellipse>().FirstOrDefault(e => e.Tag?.ToString() == "Anchor");
+            if (anchor != null) anchor.Visibility = Visibility.Visible;
 
-            if (_selectedElement.Tag is ShapeData data)
+            CreateHandles(shapeContainer);
+            UpdateBoundingBox(shapeContainer);
+
+            _isUpdating = true;
+            if (shapeContainer.Tag is ShapeData data)
             {
-                _isUpdating = true;
                 Brush currentFill = null;
-                var hitArea = shapeCanvas.Children.OfType<Polygon>().FirstOrDefault();
-                if (hitArea != null) currentFill = hitArea.Fill;
-                var ellipse = shapeCanvas.Children.OfType<Ellipse>().FirstOrDefault();
-                if (ellipse != null) currentFill = ellipse.Fill;
+                if (data.BasePoints == null)
+                {
+                    var ellipse = shapeContainer.Children.OfType<Ellipse>().FirstOrDefault(e => e.Tag?.ToString() != "Anchor");
+                    if (ellipse != null) currentFill = ellipse.Fill;
+                }
+                else
+                {
+                    var hitArea = shapeContainer.Children.OfType<Polygon>().FirstOrDefault(p => p.Tag?.ToString() == "HitArea");
+                    if (hitArea != null) currentFill = hitArea.Fill;
+                }
 
                 if (currentFill != null)
-                    FillColorCombo.SelectedIndex = _availableColors.FindIndex(b => b.ToString() == currentFill.ToString());
+                {
+                    int fillIndex = _availableColors.FindIndex(b => b.ToString() == currentFill.ToString());
+                    if (fillIndex == -1 && currentFill is SolidColorBrush scb)
+                    {
+                        fillIndex = _availableColors.FindIndex(b => b is SolidColorBrush ab && ab.Color.R == scb.Color.R && ab.Color.G == scb.Color.G && ab.Color.B == scb.Color.B);
+                    }
+                    if (fillIndex != -1) FillColorCombo.SelectedIndex = fillIndex;
+                }
 
-                // --- ИЗМЕНЕНИЯ ЗДЕСЬ (Масштаб 1-100) ---
                 double maxDim = Math.Max(data.SizeX, data.SizeY) * 2.0;
                 if (maxDim < MIN_SHAPE_SIZE) maxDim = MIN_SHAPE_SIZE;
                 if (maxDim > MAX_SHAPE_SIZE) maxDim = MAX_SHAPE_SIZE;
-
                 double scale1to100 = 1.0 + (maxDim - MIN_SHAPE_SIZE) / (MAX_SHAPE_SIZE - MIN_SHAPE_SIZE) * 99.0;
-
                 GlobalSizeSlider.Value = scale1to100;
                 GlobalSizeBox.Text = Math.Round(scale1to100).ToString();
-                // -----------------------
-
-                _isUpdating = false;
             }
+            _isUpdating = false;
 
-            int sides = 1;
-            if (_selectedElement.Tag is ShapeData sd && sd.BasePoints != null)
-            {
-                sides = sd.IsClosed ? sd.BasePoints.Length : sd.BasePoints.Length - 1;
-            }
-            GenerateSideMenu(_selectedElement, sides);
+            UpdateGlobalSelectionUI();
+            UpdateRightPanelUI();
         }
+
         private void DeselectAll()
         {
-            _selectedSideIndex = -1; // Сбрасываем выбранную сторону
-            var anchor = _selectedElement?.Children.OfType<Ellipse>().FirstOrDefault(a => a.Tag?.ToString() == "Anchor");
-            if (anchor != null) anchor.Visibility = Visibility.Collapsed;
-
-            if (_selectedElement != null)
+            foreach (var element in _selectedElements)
             {
-                _selectedElement.Opacity = 1.0;
-
-                // Прячем рамку при снятии выделения
-                var bbox = _selectedElement.Children.OfType<Rectangle>().FirstOrDefault(r => r.Tag?.ToString() == "BoundingBox");
+                var bbox = element.Children.OfType<Rectangle>().FirstOrDefault(r => r.Tag?.ToString() == "BoundingBox");
                 if (bbox != null) bbox.Visibility = Visibility.Collapsed;
 
-                // НОВОЕ: Удаляем маркеры
-                var handles = _selectedElement.Children.OfType<FrameworkElement>().Where(x => x.Tag?.ToString().StartsWith("Vertex_") == true || x.Tag?.ToString().StartsWith("Resize_") == true).ToList();
-                foreach (var h in handles) _selectedElement.Children.Remove(h);
+                // --- ФИКС: Скрываем маркеры и артефакты подсветки ---
+                var anchor = element.Children.OfType<Ellipse>().FirstOrDefault(e => e.Tag?.ToString() == "Anchor");
+                if (anchor != null) anchor.Visibility = Visibility.Collapsed;
+
+                var highlight = element.Children.OfType<Line>().FirstOrDefault(l => l.Tag?.ToString() == "SideHighlight");
+                if (highlight != null) highlight.Visibility = Visibility.Collapsed;
+
+                var handles = element.Children.OfType<FrameworkElement>()
+                    .Where(x => x.Tag?.ToString().StartsWith("Vertex_") == true ||
+                                x.Tag?.ToString().StartsWith("Resize_") == true).ToList();
+
+                foreach (var h in handles) element.Children.Remove(h);
             }
+
+            _selectedElements.Clear();
             _selectedElement = null;
-            _selectedElement = null;
-            PropertiesPanel.Visibility = Visibility.Collapsed;
-            
+            _selectedSideIndex = -1;
+
+            if (_globalBoundingBox != null) _globalBoundingBox.Visibility = Visibility.Collapsed;
+            if (_globalAnchor != null) _globalAnchor.Visibility = Visibility.Collapsed;
+
+            SidePropertiesList.Children.Clear();
+            UpdateRightPanelUI();
         }
         private void DeleteShape_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedElement != null)
+            if (_selectedElements.Count > 0)
             {
-                MainCanvas.Children.Remove(_selectedElement);
+                // Удаляем все выделенные фигуры (одиночные или целые группы)
+                foreach (var element in _selectedElements)
+                {
+                    MainCanvas.Children.Remove(element);
+                }
+
+                _selectedElements.Clear();
                 _selectedElement = null;
-                PropertiesPanel.Visibility = Visibility.Collapsed;
+                _selectedSideIndex = -1;
+
+                if (_globalBoundingBox != null) _globalBoundingBox.Visibility = Visibility.Collapsed;
+                if (_globalAnchor != null) _globalAnchor.Visibility = Visibility.Collapsed;
+
+                // --- НОВОЕ: Проверяем, не осталось ли групп с 1 или 0 элементов ---
+                CleanupEmptyGroups();
+
+                SidePropertiesList.Children.Clear();
+                UpdateRightPanelUI();
+            }
+        }
+
+        // --- НОВЫЙ МЕТОД: Очистка расформированных групп ---
+        private void CleanupEmptyGroups()
+        {
+            // Идем с конца списка, чтобы безопасно удалять элементы в процессе
+            for (int i = _shapeGroups.Count - 1; i >= 0; i--)
+            {
+                var group = _shapeGroups[i];
+                var shapesInGroup = MainCanvas.Children.OfType<Canvas>()
+                    .Where(c => (c.Tag as ShapeData)?.GroupId == group.Id).ToList();
+
+                // Если в группе осталась 1 фигура (или 0) - снимаем с неё статус группы
+                if (shapesInGroup.Count <= 1)
+                {
+                    foreach (var s in shapesInGroup)
+                    {
+                        if (s.Tag is ShapeData d) d.GroupId = null;
+                    }
+                    _shapeGroups.RemoveAt(i);
+                }
             }
         }
         private void GlobalSize_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)

@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows;
+using System.Windows.Input;
 
 namespace Lab1
 {
@@ -574,8 +575,195 @@ namespace Lab1
             var ellipse = _selectedElement.Children.OfType<Ellipse>().FirstOrDefault();
             if (ellipse != null) ellipse.Fill = selectedColor;
         }
+        public void UpdateRightPanelUI()
+        {
+            PropertiesPanel.Visibility = Visibility.Visible; // <--- ВКЛЮЧАЕМ ПАНЕЛЬ!
 
+            if (_selectedElements.Count == 0)
+            {
+                GenerateGroupsListMenu();
+            }
+            else if (_selectedElements.Count == 1)
+            {
+                var shape = _selectedElements[0];
+                int sides = 1;
+                if (shape.Tag is ShapeData sd && sd.BasePoints != null)
+                {
+                    sides = sd.IsClosed ? sd.BasePoints.Length : sd.BasePoints.Length - 1;
+                }
+                GenerateSideMenu(shape, sides);
+            }
+            else
+            {
+                GenerateGroupMenu();
+            }
+        }        // --- 1. МЕНЮ СПИСКА ГРУПП (Когда ничего не выделено) ---
+        private void GenerateGroupsListMenu()
+        {
+            SidePropertiesList.Children.Clear();
 
+            if (_shapeGroups.Count == 0)
+            {
+                SidePropertiesList.Children.Add(new TextBlock { Text = "Нет созданных групп.\nВыделите фигуры и нажмите Ctrl+G", Foreground = Brushes.Gray, TextWrapping = TextWrapping.Wrap });
+                return;
+            }
+
+            SidePropertiesList.Children.Add(new TextBlock { Text = "СПИСОК ГРУПП:", FontWeight = FontWeights.Bold, Foreground = Brushes.White, Margin = new Thickness(0, 0, 0, 10) });
+
+            foreach (var group in _shapeGroups)
+            {
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+
+                // Поле для переименования группы
+                var nameBox = new TextBox { Text = group.Name, Width = 130, Background = new SolidColorBrush(Color.FromRgb(37, 37, 38)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(85, 85, 85)), Padding = new Thickness(2) };
+                nameBox.TextChanged += (s, e) => { group.Name = nameBox.Text; };
+
+                // Кнопка выделения группы
+                var selectBtn = new Button { Content = "Выбрать", Background = new SolidColorBrush(Color.FromRgb(0, 122, 204)), Foreground = Brushes.White, BorderThickness = new Thickness(0), Padding = new Thickness(5, 2, 5, 2), Margin = new Thickness(10, 0, 0, 0), Cursor = Cursors.Hand };
+                selectBtn.Click += (s, e) => {
+                    DeselectAll();
+                    var groupShapes = MainCanvas.Children.OfType<Canvas>().Where(c => (c.Tag as ShapeData)?.GroupId == group.Id).ToList();
+                    foreach (var gs in groupShapes) SelectShape(gs, true);
+                    UpdateGlobalSelectionUI();
+                    UpdateRightPanelUI();
+                };
+
+                row.Children.Add(nameBox);
+                row.Children.Add(selectBtn);
+                SidePropertiesList.Children.Add(row);
+            }
+        }
+
+        // --- 2. МЕНЮ СВОЙСТВ ГРУППЫ (Мульти-выделение) ---
+        private void GenerateGroupMenu()
+        {
+            SidePropertiesList.Children.Clear();
+
+            // Проверяем, являются ли выделенные элементы зарегистрированной группой
+            string firstGroupId = (_selectedElements[0].Tag as ShapeData)?.GroupId;
+            bool isFormalGroup = !string.IsNullOrEmpty(firstGroupId) && _selectedElements.All(e => (e.Tag as ShapeData)?.GroupId == firstGroupId);
+
+            string title = isFormalGroup ? $"СВОЙСТВА: {_shapeGroups.FirstOrDefault(g => g.Id == firstGroupId)?.Name}" : "МУЛЬТИ-ВЫДЕЛЕНИЕ";
+            SidePropertiesList.Children.Add(new TextBlock { Text = title.ToUpper(), FontWeight = FontWeights.Bold, Foreground = Brushes.White, Margin = new Thickness(0, 0, 0, 10) });
+
+            if (isFormalGroup)
+            {
+                // --- НОВОЕ: Кнопка сброса привязки в центр ---
+                var centerBtn = new Button { Content = "Сбросить привязку в центр", Foreground = Brushes.White, Background = new SolidColorBrush(Color.FromRgb(0, 122, 204)), BorderThickness = new Thickness(0), Padding = new Thickness(5), Margin = new Thickness(0, 0, 0, 10), Cursor = Cursors.Hand };
+                centerBtn.Click += (s, e) => {
+                    double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+                    foreach (var container in _selectedElements)
+                    {
+                        var bbox = container.Children.OfType<Rectangle>().FirstOrDefault(r => r.Tag?.ToString() == "BoundingBox");
+                        if (bbox != null)
+                        {
+                            double left = Canvas.GetLeft(bbox) + Canvas.GetLeft(container);
+                            double top = Canvas.GetTop(bbox) + Canvas.GetTop(container);
+                            if (left < minX) minX = left;
+                            if (left + bbox.Width > maxX) maxX = left + bbox.Width;
+                            if (top < minY) minY = top;
+                            if (top + bbox.Height > maxY) maxY = top + bbox.Height;
+                        }
+                    }
+                    var group = _shapeGroups.FirstOrDefault(g => g.Id == firstGroupId);
+                    if (group != null && minX != double.MaxValue)
+                    {
+                        group.GroupAnchor = new Point((minX + maxX) / 2, (minY + maxY) / 2);
+                        UpdateGlobalSelectionUI(); // Перерисовываем оранжевую точку
+                    }
+                };
+                SidePropertiesList.Children.Add(centerBtn);
+
+                var ungroupBtn = new Button { Content = "Разгруппировать (Удалить группу)", Background = new SolidColorBrush(Color.FromRgb(204, 45, 45)), Foreground = Brushes.White, BorderThickness = new Thickness(0), Padding = new Thickness(5), Margin = new Thickness(0, 0, 0, 15), Cursor = Cursors.Hand };
+                ungroupBtn.Click += (s, e) => UngroupSelected(firstGroupId);
+                SidePropertiesList.Children.Add(ungroupBtn);
+            }
+            else
+            {
+                SidePropertiesList.Children.Add(new TextBlock { Text = "Нажмите Ctrl+G чтобы сгруппировать", Foreground = Brushes.Gray, FontSize = 10, Margin = new Thickness(0, 0, 0, 15) });
+            }
+
+            Brush darkBg = new SolidColorBrush(Color.FromRgb(37, 37, 38));
+            Brush bdr = new SolidColorBrush(Color.FromRgb(85, 85, 85));
+
+            // Общий цвет обводки
+            var row1 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+            row1.Children.Add(new TextBlock { Text = "Цвет линий:", Foreground = Brushes.White, Width = 80, VerticalAlignment = VerticalAlignment.Center });
+            var colorCombo = new ComboBox { Background = darkBg, Foreground = Brushes.White, BorderBrush = bdr, Width = 90 };
+            colorCombo.Items.Add(new TextBlock { Text = "Не изменять", Foreground = Brushes.White, FontSize = 11 });
+            foreach (var color in _availableColors) colorCombo.Items.Add(new Rectangle { Fill = color, Width = 30, Height = 12 });
+            colorCombo.SelectedIndex = 0;
+
+            colorCombo.SelectionChanged += (s, e) => {
+                if (colorCombo.SelectedIndex == 0) return;
+                Brush newColor = _availableColors[colorCombo.SelectedIndex - 1];
+                foreach (var canvas in _selectedElements)
+                {
+                    if (canvas.Tag is ShapeData data)
+                    {
+                        if (data.CurrentColors != null)
+                        {
+                            for (int i = 0; i < data.CurrentColors.Length; i++) data.CurrentColors[i] = newColor;
+                        }
+                        else
+                        {
+                            var ellipse = canvas.Children.OfType<Ellipse>().FirstOrDefault(x => x.Tag?.ToString() != "Anchor");
+                            if (ellipse != null) ellipse.Stroke = newColor;
+                        }
+                        UpdatePolygonGeometry(canvas);
+                    }
+                }
+            };
+            row1.Children.Add(colorCombo);
+            SidePropertiesList.Children.Add(row1);
+
+            // Общая толщина
+            var row2 = new StackPanel { Orientation = Orientation.Horizontal };
+            row2.Children.Add(new TextBlock { Text = "Толщина:", Foreground = Brushes.White, Width = 80, VerticalAlignment = VerticalAlignment.Center });
+            var thickSlider = new Slider { Width = 80, Minimum = 1, Maximum = 50, Value = 2, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) };
+            var thickBox = new TextBox { Text = "2", Width = 30, Background = darkBg, Foreground = Brushes.White, BorderBrush = bdr, TextAlignment = TextAlignment.Center };
+
+            thickSlider.ValueChanged += (s, e) => { thickBox.Text = Math.Round(e.NewValue).ToString(); };
+            thickBox.TextChanged += (s, e) => {
+                if (double.TryParse(thickBox.Text, out double v))
+                {
+                    if (v < 1) v = 1; if (v > 50) v = 50;
+                    thickSlider.Value = v;
+                    foreach (var canvas in _selectedElements)
+                    {
+                        if (canvas.Tag is ShapeData data)
+                        {
+                            if (data.CurrentThicknesses != null)
+                            {
+                                for (int i = 0; i < data.CurrentThicknesses.Length; i++) data.CurrentThicknesses[i] = v;
+                            }
+                            else
+                            {
+                                var ellipse = canvas.Children.OfType<Ellipse>().FirstOrDefault(x => x.Tag?.ToString() != "Anchor");
+                                if (ellipse != null) ellipse.StrokeThickness = v;
+                            }
+                            UpdatePolygonGeometry(canvas);
+                        }
+                    }
+                }
+            };
+            row2.Children.Add(thickSlider);
+            row2.Children.Add(thickBox);
+            SidePropertiesList.Children.Add(row2);
+        }
+
+        // --- 3. МЕТОД РАЗГРУППИРОВКИ ---
+        private void UngroupSelected(string groupId)
+        {
+            _shapeGroups.RemoveAll(g => g.Id == groupId);
+            foreach (var element in _selectedElements)
+            {
+                if (element.Tag is ShapeData data) data.GroupId = null;
+            }
+            // Перерисовываем UI
+            UpdateGlobalSelectionUI();
+            UpdateRightPanelUI();
+        }
 
     }
 }

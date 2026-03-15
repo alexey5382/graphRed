@@ -16,7 +16,35 @@ namespace Lab1
         protected override void OnPreviewKeyDown(KeyEventArgs e)
         {
             base.OnPreviewKeyDown(e);
+            // --- ГРУППИРОВКА CTRL + G ---
+            if (e.Key == Key.G && Keyboard.IsKeyDown(Key.LeftCtrl))
+            {
+                if (_selectedElements.Count > 1)
+                {
+                    ShapeGroup newGroup = new ShapeGroup { Name = $"Группа {_shapeGroups.Count + 1}" };
 
+                    // Вычисляем общий центр для якоря группы
+                    double sumX = 0, sumY = 0;
+                    foreach (var canvas in _selectedElements)
+                    {
+                        if (canvas.Tag is ShapeData d) d.GroupId = newGroup.Id;
+                        sumX += Canvas.GetLeft(canvas) + 500; // Примерный центр
+                        sumY += Canvas.GetTop(canvas) + 500;
+                    }
+                    newGroup.GroupAnchor = new Point(sumX / _selectedElements.Count, sumY / _selectedElements.Count);
+
+                    _shapeGroups.Add(newGroup);
+
+                    // Перерисовываем выделение (чтобы появилась групповая рамка)
+                    var temp = _selectedElements.ToList();
+                    DeselectAll();
+                    foreach (var canvas in temp) SelectShape(canvas, true);
+                    UpdateRightPanelUI();
+
+                }
+                e.Handled = true;
+                return;
+            }
             if (_isDrawingMode)
             {
                 if (e.Key == Key.Enter)
@@ -88,17 +116,37 @@ namespace Lab1
                 return; // Важно выйти, чтобы клик не ушел в "пустоту"
             }
 
-            // 3. КЛИК ПО ПУСТОМУ ХОЛСТУ (Снятие выделения)
+            // 3. КЛИК ПО ПУСТОМУ ХОЛСТУ (Снятие выделения или старт рамки)
             if (e.Source == MainCanvas)
             {
-                DeselectAll();
+                if (!Keyboard.IsKeyDown(Key.LeftShift))
+                {
+                    DeselectAll();
+                }
+
+                // Начинаем рисовать рамку выделения
+                _isSelecting = true;
+                _selectionStartPoint = e.GetPosition(MainCanvas);
+                _selectionBox = new Rectangle
+                {
+                    Stroke = Brushes.DodgerBlue,
+                    StrokeThickness = 1,
+                    Fill = new SolidColorBrush(Color.FromArgb(50, 30, 144, 255)), // Полупрозрачный синий
+                    Tag = "SelectionBox"
+                };
+                Canvas.SetLeft(_selectionBox, _selectionStartPoint.X);
+                Canvas.SetTop(_selectionBox, _selectionStartPoint.Y);
+                Panel.SetZIndex(_selectionBox, 10000);
+                MainCanvas.Children.Add(_selectionBox);
+
+                MainCanvas.CaptureMouse();
                 return;
             }
             // 3.5. НОВОЕ: КЛИК ПО ВЕРШИНЕ (Vertex)
             if (e.Source is Ellipse elV && elV.Tag?.ToString().StartsWith("Vertex_") == true)
             {
                 _draggedVertexIndex = int.Parse(elV.Tag.ToString().Split('_')[1]);
-                elV.CaptureMouse();
+                Mouse.Capture(elV); // ФИКС: Жесткий захват на уровне системы
                 e.Handled = true;
                 return;
             }
@@ -131,7 +179,7 @@ namespace Lab1
                 _resizeMinX = minX; _resizeMaxX = maxX; _resizeMinY = minY; _resizeMaxY = maxY;
                 _resizeStartWidth = maxX - minX; _resizeStartHeight = maxY - minY;
 
-                rh.CaptureMouse();
+                Mouse.Capture(rh); // ФИКС: Жесткий захват на уровне системы
                 e.Handled = true;
                 return;
             }
@@ -153,34 +201,59 @@ namespace Lab1
                 return;
             }
 
-            // 5. КЛИК ПО ФИГУРЕ ИЛИ ЕЕ СТОРОНЕ (Выделение и перетаскивание)
+            // 5. КЛИК ПО ФИГУРЕ (Выделение группы, одной фигуры и перетаскивание)
             if (e.Source is Shape clickedShape)
             {
                 var parentCanvas = VisualTreeHelper.GetParent(clickedShape) as Canvas;
-
                 if (parentCanvas != null && parentCanvas != MainCanvas)
                 {
-                    int clickedSide = -1;
-                    if (clickedShape is Polygon poly && poly.Tag?.ToString() == "Stroke")
+                    ShapeData data = parentCanvas.Tag as ShapeData;
+                    bool isCtrlPressed = Keyboard.IsKeyDown(Key.LeftCtrl);
+                    bool isShiftPressed = Keyboard.IsKeyDown(Key.LeftShift);
+
+                    if (data != null && !string.IsNullOrEmpty(data.GroupId))
                     {
-                        var strokes = parentCanvas.Children.OfType<Polygon>().Where(p => p.Tag?.ToString() == "Stroke").ToList();
-                        clickedSide = strokes.IndexOf(poly);
+                        if (isCtrlPressed)
+                        {
+                            // Ctrl нажат: Выделяем ТОЛЬКО эту фигуру (даже если выделена вся группа)
+                            if (!_selectedElements.Contains(parentCanvas) || _selectedElements.Count > 1)
+                            {
+                                if (!isShiftPressed) DeselectAll();
+                                SelectShape(parentCanvas, multiSelect: isShiftPressed);
+                            }
+                        }
+                        else
+                        {
+                            // Ctrl НЕ нажат: Выделяем всю группу...
+                            // НО! Если эта фигура УЖЕ была выделена одна (через Ctrl), позволяем ее тащить без сброса на группу!
+                            if (_selectedElements.Count == 1 && _selectedElements[0] == parentCanvas)
+                            {
+                                // Оставляем выделенной одну фигуру, ничего не делаем
+                            }
+                            else
+                            {
+                                var groupShapes = MainCanvas.Children.OfType<Canvas>().Where(c => (c.Tag as ShapeData)?.GroupId == data.GroupId).ToList();
+                                bool isGroupFullySelected = groupShapes.All(g => _selectedElements.Contains(g));
+
+                                if (!isGroupFullySelected)
+                                {
+                                    if (!isShiftPressed) DeselectAll();
+                                    foreach (var gs in groupShapes) SelectShape(gs, multiSelect: true);
+                                }
+                            }
+                        }
+                    }
+                    else // Фигура не в группе
+                    {
+                        if (!_selectedElements.Contains(parentCanvas))
+                        {
+                            if (!isShiftPressed) DeselectAll();
+                            SelectShape(parentCanvas, multiSelect: isShiftPressed);
+                        }
                     }
 
-                    if (_selectedElement != parentCanvas || _selectedSideIndex != clickedSide)
-                    {
-                        SelectShape(parentCanvas);
-                        _selectedSideIndex = clickedSide;
-
-                        int sides = parentCanvas.Children.OfType<Polygon>().Count(p => p.Tag?.ToString() == "Stroke");
-                        if (sides == 0) sides = 1;
-                        GenerateSideMenu(parentCanvas, sides);
-                        UpdatePolygonGeometry(parentCanvas);
-                    }
-
-                    _draggedElement = parentCanvas;
                     _clickPosition = e.GetPosition(MainCanvas);
-                    _draggedElement.CaptureMouse();
+                    Mouse.Capture(MainCanvas); // Захватываем для движения
                     e.Handled = true;
                 }
             }
@@ -370,56 +443,121 @@ namespace Lab1
                 if (sides == 0) sides = 1;
                 // GenerateSideMenu(_selectedElement, sides); // Убрано, чтобы ползунки не сбрасывались при каждом сдвиге мыши
             }
-            // 4. Перетаскивание самой фигуры
-            else if (_draggedElement != null)
+            // 4. Перемещение всех выделенных фигур
+            else if (e.LeftButton == MouseButtonState.Pressed && _selectedElements.Count > 0 && MainCanvas.IsMouseCaptured)
             {
                 Point p = e.GetPosition(MainCanvas);
                 double dx = p.X - _clickPosition.X;
                 double dy = p.Y - _clickPosition.Y;
 
-                Canvas.SetLeft(_draggedElement, Canvas.GetLeft(_draggedElement) + dx);
-                Canvas.SetTop(_draggedElement, Canvas.GetTop(_draggedElement) + dy);
+                foreach (var element in _selectedElements)
+                {
+                    Canvas.SetLeft(element, Canvas.GetLeft(element) + dx);
+                    Canvas.SetTop(element, Canvas.GetTop(element) + dy);
+                }
 
                 _clickPosition = p;
-                UpdateCoordinatesUI();
+
+                // Если мы тащим группу, нужно сдвинуть и её якорь
+                if (_selectedElements.Count > 1)
+                {
+                    string firstGroupId = (_selectedElements[0].Tag as ShapeData)?.GroupId;
+                    var group = _shapeGroups.FirstOrDefault(g => g.Id == firstGroupId);
+                    if (group != null)
+                    {
+                        group.GroupAnchor = new Point(group.GroupAnchor.X + dx, group.GroupAnchor.Y + dy);
+                    }
+                }
+
+                // Обновляем глобальную рамку выделения при движении
+                UpdateGlobalSelectionUI();
+            }
+            // --- РИСОВАНИЕ РАМКИ ВЫДЕЛЕНИЯ ---
+            if (_isSelecting && _selectionBox != null)
+            {
+                Point current = e.GetPosition(MainCanvas);
+                double x = Math.Min(current.X, _selectionStartPoint.X);
+                double y = Math.Min(current.Y, _selectionStartPoint.Y);
+                double width = Math.Abs(current.X - _selectionStartPoint.X);
+                double height = Math.Abs(current.Y - _selectionStartPoint.Y);
+
+                Canvas.SetLeft(_selectionBox, x);
+                Canvas.SetTop(_selectionBox, y);
+                _selectionBox.Width = width;
+                _selectionBox.Height = height;
+                return;
             }
         }
         private void MainCanvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
+            if (_isSelecting)
+            {
+                _isSelecting = false;
+                Mouse.Capture(null);
+
+                if (_selectionBox != null)
+                {
+                    Rect selectionRect = new Rect(Canvas.GetLeft(_selectionBox), Canvas.GetTop(_selectionBox), _selectionBox.Width, _selectionBox.Height);
+                    MainCanvas.Children.Remove(_selectionBox);
+                    _selectionBox = null;
+
+                    if (selectionRect.Width < 5 || selectionRect.Height < 5) return;
+
+                    List<Canvas> newlySelected = new List<Canvas>();
+                    var allShapes = MainCanvas.Children.OfType<Canvas>().Where(c => c.Tag is ShapeData).ToList();
+
+                    foreach (var shape in allShapes)
+                    {
+                        var bbox = shape.Children.OfType<Rectangle>().FirstOrDefault(r => r.Tag?.ToString() == "BoundingBox");
+                        if (bbox != null)
+                        {
+                            // ФИКС КООРДИНАТ ДЛЯ МУЛЬТИ-ВЫДЕЛЕНИЯ
+                            double absX = Canvas.GetLeft(shape) + Canvas.GetLeft(bbox);
+                            double absY = Canvas.GetTop(shape) + Canvas.GetTop(bbox);
+                            Rect shapeRect = new Rect(absX, absY, bbox.Width, bbox.Height);
+
+                            if (selectionRect.Contains(shapeRect)) newlySelected.Add(shape);
+                        }
+                    }
+
+                    if (newlySelected.Count > 0)
+                    {
+                        if (!Keyboard.IsKeyDown(Key.LeftShift)) DeselectAll();
+                        foreach (var shape in newlySelected) SelectShape(shape, multiSelect: true);
+                    }
+                }
+                return;
+            }
+
+            // ФИКС ОСВОБОЖДЕНИЯ МЫШИ (отвечает за перемещение, вершины и зависания)
             if (_draggedVertexIndex != -1)
             {
-                if (e.Source is UIElement ui) ui.ReleaseMouseCapture();
+                Mouse.Capture(null);
                 _draggedVertexIndex = -1;
                 e.Handled = true;
             }
             if (_draggedResizeHandle != null)
             {
-                if (e.Source is UIElement ui) ui.ReleaseMouseCapture();
+                Mouse.Capture(null);
                 _draggedResizeHandle = null;
                 e.Handled = true;
             }
             if (_draggedAnchor != null)
             {
-                _draggedAnchor.ReleaseMouseCapture();
+                Mouse.Capture(null);
                 _draggedAnchor = null;
+            }
 
-                // Перерисовываем меню, чтобы обновить цифры координат относительно новой точки
-                if (_selectedElement != null)
-                {
-                    int sides = _selectedElement.Children.OfType<Polygon>().Count(p => p.Tag?.ToString() == "Stroke");
-                    if (sides == 0) sides = 1;
-                    //GenerateSideMenu(_selectedElement, sides);
-                }
-            }
-            if (_draggedElement != null)
+            // Если холст захватил мышь для перетаскивания фигуры - обязательно отпускаем её!
+            if (MainCanvas.IsMouseCaptured)
             {
-                _draggedElement.ReleaseMouseCapture();
-                _draggedElement = null;
-                // Фигура остается выбранной, но перестает следовать за мышью
+                Mouse.Capture(null);
             }
+
             if (_isInteractiveCreation && _interactivePreviewBox != null)
             {
-                MainCanvas.ReleaseMouseCapture();
+                Mouse.Capture(null);
+                // ... (остальной старый код интерактивного создания из твоего файла, начиная с double finalW = ...)
 
                 double finalW = _interactivePreviewBox.Width;
                 double finalH = _interactivePreviewBox.Height;
@@ -431,15 +569,12 @@ namespace Lab1
                 _isInteractiveCreation = false;
                 MainCanvas.Cursor = Cursors.Arrow;
 
-                // Защита от случайного микро-клика
                 if (finalW < 10 || finalH < 10) return;
 
                 var (colors, thicks) = GetCreationProperties();
                 Brush defaultFill = GetCreationFillColor();
 
-                double sizeX = finalW / 2;
-                double sizeY = finalH / 2;
-                // Находим истинный центр прямоугольника
+                double sizeX = finalW / 2; double sizeY = finalH / 2;
                 Point centerPoint = new Point(left + sizeX - 500, top + sizeY - 500);
 
                 MyShape shape = _pendingShapeType switch
@@ -455,17 +590,13 @@ namespace Lab1
                 if (shape != null)
                 {
                     var visual = (Canvas)shape.CreateVisual(sizeX, sizeY);
-                    Canvas.SetLeft(visual, centerPoint.X);
-                    Canvas.SetTop(visual, centerPoint.Y);
-
+                    Canvas.SetLeft(visual, centerPoint.X); Canvas.SetTop(visual, centerPoint.Y);
                     UpdatePolygonGeometry(visual);
                     MainCanvas.Children.Add(visual);
                     SelectShape(visual);
                 }
-                return;
             }
         }
-
 
     }
 }
